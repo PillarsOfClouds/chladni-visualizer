@@ -12,6 +12,8 @@
         #start.hide{display:none}
         #start span{color:#4f4;font:1rem monospace;letter-spacing:4px}
         #start small{color:#333;font:0.7rem monospace;margin-top:1rem}
+        #fs{position:fixed;bottom:20px;right:20px;background:none;border:1px solid #4f4;color:#4f4;font:0.7rem monospace;padding:8px 12px;cursor:pointer;z-index:100;opacity:0.5}
+        #fs:hover{opacity:1}
     </style>
 </head>
 <body>
@@ -19,8 +21,17 @@
         <span>CLICK TO START</span>
         <small>max sensitivity mode</small>
     </div>
+    <button id="fs">⛶ FULLSCREEN</button>
     <canvas id="c"></canvas>
     <script>
+        document.getElementById('fs').onclick = () => {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(()=>{});
+            } else {
+                document.exitFullscreen();
+            }
+        };
+
         const c = document.getElementById('c');
         const ctx = c.getContext('2d');
         let w, h, p = [], analyser, freqData;
@@ -62,8 +73,8 @@
                 const stream = await navigator.mediaDevices.getUserMedia({audio: true});
                 const actx = new AudioContext();
                 analyser = actx.createAnalyser();
-                analyser.fftSize = 1024; // Higher resolution FFT
-                analyser.smoothingTimeConstant = 0.3; // Less smoothing = faster response
+                analyser.fftSize = 1024;
+                analyser.smoothingTimeConstant = 0.3;
                 actx.createMediaStreamSource(stream).connect(analyser);
                 freqData = new Uint8Array(analyser.frequencyBinCount);
                 return true;
@@ -78,7 +89,6 @@
             
             analyser.getByteFrequencyData(freqData);
             
-            // 12 frequency bands for fine-grained analysis
             const bandSize = Math.floor(freqData.length / 12);
             const bands = [];
             for (let i = 0; i < 12; i++) {
@@ -89,7 +99,6 @@
                 bands.push(sum / bandSize / 255);
             }
             
-            // Overall level (very sensitive - use RMS)
             let rmsSum = 0;
             for (let i = 0; i < freqData.length; i++) {
                 const normalized = freqData[i] / 255;
@@ -97,7 +106,6 @@
             }
             const level = Math.sqrt(rmsSum / freqData.length);
             
-            // Find spectral centroid (center of mass of frequency)
             let weightedSum = 0;
             let totalWeight = 0;
             for (let i = 0; i < freqData.length; i++) {
@@ -106,7 +114,6 @@
             }
             const centroid = totalWeight > 0 ? weightedSum / totalWeight / freqData.length : 0.5;
             
-            // Calculate spectral spread (how wide the frequency content is)
             let spreadSum = 0;
             for (let i = 0; i < freqData.length; i++) {
                 const diff = (i / freqData.length) - centroid;
@@ -114,14 +121,10 @@
             }
             const spread = totalWeight > 0 ? Math.sqrt(spreadSum / totalWeight) : 0.2;
             
-            // Low vs high balance
             const lowEnergy = bands.slice(0, 4).reduce((a,b) => a+b, 0) / 4;
             const midEnergy = bands.slice(4, 8).reduce((a,b) => a+b, 0) / 4;
             const highEnergy = bands.slice(8, 12).reduce((a,b) => a+b, 0) / 4;
             
-            // CONTINUOUS m and n values (the key to sensitivity)
-            // m: driven by spectral centroid (1 to 7)
-            // n: driven by spread and high/low ratio (1 to 7)
             const m = 1 + centroid * 6;
             const hiLoRatio = (highEnergy + midEnergy) / (lowEnergy + 0.01);
             const n = 1 + (spread * 3 + Math.min(hiLoRatio, 1) * 3);
@@ -129,7 +132,6 @@
             return { level, m, n };
         }
 
-        // Chladni with continuous m,n (not just integers)
         function chladni(x, y, m, n) {
             const nx = (x / w) * 2 - 1;
             const ny = (y / h) * 2 - 1;
@@ -149,16 +151,13 @@
         function loop() {
             const audio = getAudio();
             
-            // FAST response - less smoothing
             smoothLvl += (audio.level - smoothLvl) * 0.4;
             smoothM += (audio.m - smoothM) * 0.15;
             smoothN += (audio.n - smoothN) * 0.15;
 
-            // Clear
             ctx.fillStyle = '#000';
             ctx.fillRect(0, 0, w, h);
 
-            // Very low threshold for sensitivity
             const voiceThreshold = 0.02;
             
             if (smoothLvl > voiceThreshold) {
@@ -167,7 +166,6 @@
                 silenceTimer += 0.016;
             }
 
-            // Mode
             let mode = 0;
             let orbitMode = 0;
             
@@ -179,11 +177,9 @@
                 mode = 0;
             }
 
-            // Use continuous m,n values directly
             const m = smoothM;
             const n = smoothN;
 
-            // Bright green
             ctx.fillStyle = '#0f0';
 
             const cx = w / 2;
@@ -192,7 +188,6 @@
             for (let i = 0; i < p.length; i++) {
                 const pt = p[i];
 
-                // Orbital mode (30s silence)
                 if (orbitMode > 0) {
                     pt.orbitAngle += pt.orbitSpeed * 0.02;
                     pt.orbitRadius *= pt.orbitDecay;
@@ -211,7 +206,6 @@
                     pt.vy += (orbY - pt.y) * orbStrength;
                 }
 
-                // Chladni mode (speaking)
                 if (mode > 0) {
                     const force = chladniForce(pt.x, pt.y, m, n);
                     const chladniStrength = mode * smoothLvl * 4;
@@ -223,36 +217,30 @@
                     pt.vy += (Math.random() - 0.5) * smoothLvl * 0.2;
                 }
 
-                // Gentle idle drift
                 if (mode === 0 && orbitMode === 0) {
                     pt.vx += (Math.random() - 0.5) * 0.1;
                     pt.vy += (Math.random() - 0.5) * 0.1;
                 }
 
-                // Apply velocity
                 pt.x += pt.vx;
                 pt.y += pt.vy;
 
-                // Damping
                 const damp = 0.9 - mode * 0.03;
                 pt.vx *= damp;
                 pt.vy *= damp;
 
-                // Soft bounds
                 const margin = 30;
                 if (pt.x < margin) pt.vx += 1;
                 if (pt.x > w - margin) pt.vx -= 1;
                 if (pt.y < margin) pt.vy += 1;
                 if (pt.y > h - margin) pt.vy -= 1;
 
-                // Draw
                 ctx.fillRect(pt.x, pt.y, 2.5, 2.5);
             }
 
             requestAnimationFrame(loop);
         }
 
-        // Setup
         resize();
         init();
         onresize = () => { resize(); init(); };
@@ -266,3 +254,17 @@
     </script>
 </body>
 </html>
+```
+
+---
+```
+TO UPDATE GITHUB
+────────────────
+
+1. Go to your repo
+2. Click on index.html
+3. Click pencil icon (edit)
+4. Select all → Delete
+5. Paste this code
+6. Click "Commit changes"
+7. Wait 1-2 min for Pages to rebuild
